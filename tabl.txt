@@ -1,0 +1,20 @@
+Basic test points:
+x=   0.00  my= 1.0000000e+00  ref= 1.0000000e+00  ulp=0
+x=   0.50  my= 3.1622775e+00  ref= 3.1622777e+00  ulp=1
+x=   1.00  my= 1.0000000e+01  ref= 1.0000000e+01  ulp=0
+x=   2.00  my= 9.9999992e+01  ref= 1.0000000e+02  ulp=1
+x=   5.00  my= 9.9999977e+04  ref= 1.0000000e+05  ulp=3
+x=  10.00  my= 9.9999949e+09  ref= 1.0000000e+10  ulp=5
+x=  20.00  my= 9.9999905e+19  ref= 1.0000000e+20  ulp=11
+x=  38.00  my= 9.9999551e+37  ref= 9.9999997e+37  ulp=44
+
+Accuracy scan on 1000000 points:
+max ulp   = 2135663729
+avg ulp   = 152449433.775755
+worst x   = -38.682365417
+my        = -2.406108742e+38
+ref       = 2.077947658e-39
+
+Performance:
+latency    = 70.68 cycles/call
+throughput = 18.52 cycles/call
