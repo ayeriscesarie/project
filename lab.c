@@ -20,8 +20,6 @@
 #define LOG2_10_HI   3.32177734375f
 #define LOG2_10_LO   0.00015075113736234787f
 
-#define LN2          0.69314718055994530942f
-
 /* Taylor degree 10 for 2^r */
 #define T10_C0  1.0f
 #define T10_C1  0.6931471805599453f
@@ -150,7 +148,6 @@ static void init_table(void) {
 }
 
 /* ---------- V0 ---------- */
-/* single log2(10), roundf, degree-10 Taylor, Horner, fmaf */
 
 __attribute__((noinline))
 float exp10_v0(float x) {
@@ -178,7 +175,6 @@ float exp10_v0(float x) {
 }
 
 /* ---------- V1 ---------- */
-/* 2-part log2(10), shorter Taylor degree-6 */
 
 __attribute__((noinline))
 float exp10_v1(float x) {
@@ -202,7 +198,6 @@ float exp10_v1(float x) {
 }
 
 /* ---------- V2 ---------- */
-/* 2-part log2(10), degree-5 minimax-style coeffs, Horner */
 
 __attribute__((noinline))
 float exp10_v2(float x) {
@@ -225,7 +220,6 @@ float exp10_v2(float x) {
 }
 
 /* ---------- V3 ---------- */
-/* same coeffs as V2, Estrin */
 
 __attribute__((noinline))
 float exp10_v3(float x) {
@@ -249,7 +243,6 @@ float exp10_v3(float x) {
 }
 
 /* ---------- V4 ---------- */
-/* same as V2 but shifter instead of roundf */
 
 __attribute__((noinline))
 float exp10_v4(float x) {
@@ -272,7 +265,6 @@ float exp10_v4(float x) {
 }
 
 /* ---------- V5 ---------- */
-/* same as V4, but no explicit fmaf in source */
 
 __attribute__((noinline))
 float exp10_v5(float x) {
@@ -295,7 +287,6 @@ float exp10_v5(float x) {
 }
 
 /* ---------- V6 ---------- */
-/* table for 2^(i/32), tiny poly on residual */
 
 __attribute__((noinline))
 float exp10_v6(float x) {
@@ -306,7 +297,6 @@ float exp10_v6(float x) {
 
     float y = fmaf(x, LOG2_10_HI, x * LOG2_10_LO);
 
-    /* y = n + i/32 + r */
     float kf = roundf(y * TABLE_SCALE);
     int32_t k = (int32_t)kf;
 
@@ -319,7 +309,6 @@ float exp10_v6(float x) {
 
     float r = y - kf * INV_TABLE_SCALE;
 
-    /* tiny residual poly for 2^r */
     float poly = fmaf(S2_C2, r, S2_C1);
     poly = fmaf(poly, r, S2_C0);
 
@@ -330,7 +319,6 @@ float exp10_v6(float x) {
 }
 
 /* ---------- V7 AVX2 kernel ---------- */
-/* Throughput-oriented. Accuracy is effectively same idea as V5/V4. */
 
 #if defined(__AVX2__) && defined(__FMA__)
 
@@ -352,7 +340,6 @@ static inline __m256 poly_m5_avx2(__m256 r) {
 
 void exp10_v7_avx2_kernel(const float *x, float *out, size_t n) {
     const __m256 c_log2_10 = _mm256_set1_ps(LOG2_10);
-    const __m256 c_bias = _mm256_set1_ps((float)FLOAT_BIAS);
     const __m256i c_bias_i = _mm256_set1_epi32(FLOAT_BIAS);
 
     size_t i = 0;
@@ -386,7 +373,6 @@ typedef struct {
     const char *version;
     const char *optimization;
     scalar_fn_t fn;
-    int has_scalar;
 } row_desc_t;
 
 typedef struct {
@@ -429,24 +415,36 @@ static row_result_t measure_scalar_row(scalar_fn_t fn, int accuracy_samples, int
         }
 
         rr.max_ulp = max_ulp;
-        rr.avg_ulp = (valid > 0) ? (sum_ulp / valid) : 0.0;
+        rr.avg_ulp = (valid > 0) ? (sum_ulp / (double)valid) : 0.0;
         rr.worst_x = worst_x;
     }
 
     /* latency: dependent chain */
     {
         double best = 1e100;
-        volatile float x = 0.001f;
+
+        static const float base_args[16] = {
+            -3.0f, -2.5f, -2.0f, -1.5f,
+            -1.0f, -0.5f,  0.0f,  0.5f,
+             1.0f,  1.5f,  2.0f,  2.5f,
+             3.0f, -2.2f,  1.3f, -0.8f
+        };
+
+        volatile float prev = 0.12345f;
 
         for (int warm = 0; warm < 10000; ++warm) {
-            x = fn(x * 0.0001f);
+            float arg = base_args[warm & 15] + 0x1p-20f * prev;
+            prev = fn(arg);
         }
 
         for (int rep = 0; rep < repeats; ++rep) {
             uint64_t t0 = start_tsc();
+
             for (int i = 0; i < bench_n; ++i) {
-                x = fn(x * 0.0001f);
+                float arg = base_args[i & 15] + 0x1p-20f * prev;
+                prev = fn(arg);
             }
+
             uint64_t t1 = stop_tsc();
 
             double cpe = (double)(t1 - t0) / (double)bench_n;
@@ -454,32 +452,39 @@ static row_result_t measure_scalar_row(scalar_fn_t fn, int accuracy_samples, int
         }
 
         rr.latency_cpe = best;
-        if (x == -123.0f) printf("ignore: %f\n", x);
+
+        if (prev == -999.0f) {
+            printf("ignore: %f\n", prev);
+        }
     }
 
-    /* throughput: 4 independent chains */
+    /* throughput: independent calls, measured but not shown for scalar rows */
     {
         double best = 1e100;
-        volatile float x0 = 0.10f;
-        volatile float x1 = 0.20f;
-        volatile float x2 = 0.30f;
-        volatile float x3 = 0.40f;
+
+        static float args[4] = {0.10f, 0.20f, 0.30f, 0.40f};
+        volatile float r0 = 0.0f;
+        volatile float r1 = 0.0f;
+        volatile float r2 = 0.0f;
+        volatile float r3 = 0.0f;
 
         for (int warm = 0; warm < 10000; ++warm) {
-            x0 = fn(x0 * 0.0001f);
-            x1 = fn(x1 * 0.0001f);
-            x2 = fn(x2 * 0.0001f);
-            x3 = fn(x3 * 0.0001f);
+            r0 = fn(args[0]);
+            r1 = fn(args[1]);
+            r2 = fn(args[2]);
+            r3 = fn(args[3]);
         }
 
         for (int rep = 0; rep < repeats; ++rep) {
             uint64_t t0 = start_tsc();
+
             for (int i = 0; i < bench_n; ++i) {
-                x0 = fn(x0 * 0.0001f);
-                x1 = fn(x1 * 0.0001f);
-                x2 = fn(x2 * 0.0001f);
-                x3 = fn(x3 * 0.0001f);
+                r0 = fn(args[0]);
+                r1 = fn(args[1]);
+                r2 = fn(args[2]);
+                r3 = fn(args[3]);
             }
+
             uint64_t t1 = stop_tsc();
 
             double cpe = (double)(t1 - t0) / (double)(4 * bench_n);
@@ -487,8 +492,9 @@ static row_result_t measure_scalar_row(scalar_fn_t fn, int accuracy_samples, int
         }
 
         rr.throughput_cpe = best;
-        if ((x0 + x1 + x2 + x3) == -999.0f) {
-            printf("ignore: %f\n", x0);
+
+        if ((r0 + r1 + r2 + r3) == -999.0f) {
+            printf("ignore: %f\n", r0);
         }
     }
 
@@ -506,10 +512,10 @@ static row_result_t measure_v7_avx2(int bench_n, int repeats) {
 
     for (int i = 0; i < N; ++i) {
         float t = (float)i / (float)(N - 1);
-        in[i] = -5.0f + 10.0f * t; /* safe normal range for vector kernel */
+        in[i] = -5.0f + 10.0f * t;
     }
 
-    /* accuracy: compare AVX2 output to scalar V5 on these inputs */
+    /* accuracy: compare AVX2 output to scalar V5 */
     {
         exp10_v7_avx2_kernel(in, out, N);
 
@@ -540,9 +546,11 @@ static row_result_t measure_v7_avx2(int bench_n, int repeats) {
 
         for (int rep = 0; rep < repeats; ++rep) {
             uint64_t t0 = start_tsc();
+
             for (int k = 0; k < bench_n; ++k) {
                 exp10_v7_avx2_kernel(in, out, N);
             }
+
             uint64_t t1 = stop_tsc();
 
             double total_elems = (double)bench_n * (double)N;
@@ -561,7 +569,7 @@ static row_result_t measure_v7_avx2(int bench_n, int repeats) {
 static void print_header(void) {
     printf("\n");
     printf("---------------------------------------------------------------------------------------------------------------\n");
-    printf("| %-7s | %-54s | %-12s | %-12s | %-14s |\n",
+    printf("| %-7s | %-54s | %-12s | %-12s | %-22s |\n",
            "version", "optimizations made", "throughput", "latency", "accuracy");
     printf("---------------------------------------------------------------------------------------------------------------\n");
 }
@@ -583,7 +591,7 @@ static void print_row(const char *version, const char *opt, const row_result_t *
         snprintf(acc, sizeof(acc), "max=%u, avg=%.2f", rr->max_ulp, rr->avg_ulp);
     }
 
-    printf("| %-7s | %-54s | %-12s | %-12s | %-14s |\n",
+    printf("| %-7s | %-54s | %-12s | %-12s | %-22s |\n",
            version, opt, thr, lat, acc);
 }
 
@@ -595,33 +603,36 @@ static void print_footer(void) {
 int main(void) {
     init_table();
 
-    const int ACCURACY_SAMPLES = 100000;
-    const int BENCH_N = 1000000;
-    const int REPEATS = 5;
+    const int ACCURACY_SAMPLES = 50000;
+    const int BENCH_N = 20000;
+    const int REPEATS = 7;
 
     row_desc_t rows[] = {
-        {"V0", "nothing",                                         exp10_v0, 1},
-        {"V1", "2-part LOG2_10 + shorter Taylor",                 exp10_v1, 1},
-        {"V2", "degree-5 minimax-style coeffs",                   exp10_v2, 1},
-        {"V3", "Estrin scheme",                                   exp10_v3, 1},
-        {"V4", "shifter instead of roundf",                       exp10_v4, 1},
-        {"V5", "no explicit fmaf in source",                      exp10_v5, 1},
-        {"V6", "table of 2^(i/32) + tiny residual poly",          exp10_v6, 1},
+        {"V0", "nothing",                                exp10_v0},
+        {"V1", "2-part LOG2_10 + shorter Taylor",        exp10_v1},
+        {"V2", "degree-5 minimax-style coeffs",          exp10_v2},
+        {"V3", "Estrin scheme",                          exp10_v3},
+        {"V4", "shifter instead of roundf",              exp10_v4},
+        {"V5", "no explicit fmaf in source",             exp10_v5},
+        {"V6", "table of 2^(i/32) + tiny residual poly", exp10_v6},
     };
 
     const int row_count = (int)(sizeof(rows) / sizeof(rows[0]));
 
     print_header();
+    fflush(stdout);
 
     for (int i = 0; i < row_count; ++i) {
         row_result_t rr = measure_scalar_row(rows[i].fn, ACCURACY_SAMPLES, BENCH_N, REPEATS);
-        print_row(rows[i].version, rows[i].optimization, &rr, 1, 1);
+        print_row(rows[i].version, rows[i].optimization, &rr, 1, 0);
+        fflush(stdout);
     }
 
 #if defined(__AVX2__) && defined(__FMA__)
     {
         row_result_t rr = measure_v7_avx2(200, REPEATS);
         print_row("V7", "AVX2 vector kernel (throughput-oriented)", &rr, 0, 1);
+        fflush(stdout);
     }
 #else
     {
@@ -629,16 +640,17 @@ int main(void) {
         memset(&rr, 0, sizeof(rr));
         rr.skipped = 1;
         print_row("V7", "AVX2 vector kernel (not compiled / not supported)", &rr, 0, 1);
+        fflush(stdout);
     }
 #endif
 
     print_footer();
 
     printf("Notes:\n");
-    printf("1) accuracy is reported as max/avg ULP on %d grid points in [%.5f, %.5f]\n",
+    printf("1) scalar rows report latency only\n");
+    printf("2) vector row V7 reports throughput only\n");
+    printf("3) accuracy is reported as max/avg ULP on %d grid points in [%.5f, %.5f]\n",
            ACCURACY_SAMPLES, X_MIN, X_MAX);
-    printf("2) latency = dependent chain, throughput = 4 independent chains\n");
-    printf("3) V7 is vector throughput only; its accuracy is compared to V5 on the vector input batch\n");
     printf("\n");
 
     return 0;
