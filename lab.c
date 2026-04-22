@@ -9,8 +9,8 @@
 #define FLOAT_BIAS 127
 #define FLOAT_MANTISSA_LENGTH 23
 
-#define X_MIN (-44.85347f)
-#define X_MAX ( 38.53184f)
+#define X_MIN_NORMAL (-37.9f)
+#define X_MAX_NORMAL ( 38.53184f)
 
 #define SHIFTER 12582912.0f /* 0x1.8p23 */
 
@@ -82,21 +82,12 @@ static inline uint32_t U32(float x) {
     return v.u;
 }
 
-static inline float pow2i_reconstruct(int32_t n) {
+static inline float pow2i_reconstruct_normal(int32_t n) {
     if (n > 127) return INFINITY;
+    if (n < -126) return 0.0f;   /* за пределами normal области */
 
-    if (n >= -126) {
-        uint32_t bits = (uint32_t)(n + FLOAT_BIAS) << FLOAT_MANTISSA_LENGTH;
-        return F32(bits);
-    }
-
-    if (n >= -149) {
-        /* subnormal: 2^-149 corresponds to bit 0 */
-        uint32_t bits = 1u << (uint32_t)(n + 149);
-        return F32(bits);
-    }
-
-    return 0.0f;
+    uint32_t bits = (uint32_t)(n + FLOAT_BIAS) << FLOAT_MANTISSA_LENGTH;
+    return F32(bits);
 }
 
 static inline float ref_exp10f(float x) {
@@ -153,8 +144,8 @@ __attribute__((noinline))
 float exp10_v0(float x) {
     if (isnan(x)) return NAN;
     if (isinf(x)) return x > 0 ? INFINITY : 0.0f;
-    if (x > X_MAX) return INFINITY;
-    if (x < X_MIN) return 0.0f;
+    if (x > X_MAX_NORMAL) return INFINITY;
+    if (x < X_MIN_NORMAL) return 0.0f;
 
     float y = x * LOG2_10;
     float n = roundf(y);
@@ -171,7 +162,7 @@ float exp10_v0(float x) {
     poly = fmaf(poly, r, T10_C1);
     poly = fmaf(poly, r, T10_C0);
 
-    return pow2i_reconstruct((int32_t)n) * poly;
+    return pow2i_reconstruct_normal((int32_t)n) * poly;
 }
 
 /* ---------- V1 ---------- */
@@ -180,8 +171,8 @@ __attribute__((noinline))
 float exp10_v1(float x) {
     if (isnan(x)) return NAN;
     if (isinf(x)) return x > 0 ? INFINITY : 0.0f;
-    if (x > X_MAX) return INFINITY;
-    if (x < X_MIN) return 0.0f;
+    if (x > X_MAX_NORMAL) return INFINITY;
+    if (x < X_MIN_NORMAL) return 0.0f;
 
     float y = fmaf(x, LOG2_10_HI, x * LOG2_10_LO);
     float n = roundf(y);
@@ -194,7 +185,7 @@ float exp10_v1(float x) {
     poly = fmaf(poly, r, T6_C1);
     poly = fmaf(poly, r, T6_C0);
 
-    return pow2i_reconstruct((int32_t)n) * poly;
+    return pow2i_reconstruct_normal((int32_t)n) * poly;
 }
 
 /* ---------- V2 ---------- */
@@ -203,8 +194,8 @@ __attribute__((noinline))
 float exp10_v2(float x) {
     if (isnan(x)) return NAN;
     if (isinf(x)) return x > 0 ? INFINITY : 0.0f;
-    if (x > X_MAX) return INFINITY;
-    if (x < X_MIN) return 0.0f;
+    if (x > X_MAX_NORMAL) return INFINITY;
+    if (x < X_MIN_NORMAL) return 0.0f;
 
     float y = fmaf(x, LOG2_10_HI, x * LOG2_10_LO);
     float n = roundf(y);
@@ -216,7 +207,7 @@ float exp10_v2(float x) {
     poly = fmaf(poly, r, M5_C1);
     poly = fmaf(poly, r, M5_C0);
 
-    return pow2i_reconstruct((int32_t)n) * poly;
+    return pow2i_reconstruct_normal((int32_t)n) * poly;
 }
 
 /* ---------- V3 ---------- */
@@ -225,9 +216,8 @@ __attribute__((noinline))
 float exp10_v3(float x) {
     if (isnan(x)) return NAN;
     if (isinf(x)) return x > 0 ? INFINITY : 0.0f;
-    if (x > X_MAX) return INFINITY;
-    if (x < X_MIN) return 0.0f;
-
+    if (x > X_MAX_NORMAL) return INFINITY;
+    if (x < X_MIN_NORMAL) return 0.0f;
     float y = fmaf(x, LOG2_10_HI, x * LOG2_10_LO);
     float n = roundf(y);
     float r = y - n;
@@ -239,7 +229,7 @@ float exp10_v3(float x) {
     float poly = fmaf(t54, r2, t32);
     poly = fmaf(poly, r2, t10);
 
-    return pow2i_reconstruct((int32_t)n) * poly;
+    return pow2i_reconstruct_normal((int32_t)n) * poly;
 }
 
 /* ---------- V4 ---------- */
@@ -248,8 +238,8 @@ __attribute__((noinline))
 float exp10_v4(float x) {
     if (isnan(x)) return NAN;
     if (isinf(x)) return x > 0 ? INFINITY : 0.0f;
-    if (x > X_MAX) return INFINITY;
-    if (x < X_MIN) return 0.0f;
+    if (x > X_MAX_NORMAL) return INFINITY;
+    if (x < X_MIN_NORMAL) return 0.0f;
 
     float y = fmaf(x, LOG2_10_HI, x * LOG2_10_LO);
     float n = round_shifter(y);
@@ -261,7 +251,7 @@ float exp10_v4(float x) {
     poly = fmaf(poly, r, M5_C1);
     poly = fmaf(poly, r, M5_C0);
 
-    return pow2i_reconstruct((int32_t)n) * poly;
+    return pow2i_reconstruct_normal((int32_t)n) * poly;
 }
 
 /* ---------- V5 ---------- */
@@ -270,8 +260,8 @@ __attribute__((noinline))
 float exp10_v5(float x) {
     if (isnan(x)) return NAN;
     if (isinf(x)) return x > 0 ? INFINITY : 0.0f;
-    if (x > X_MAX) return INFINITY;
-    if (x < X_MIN) return 0.0f;
+    if (x > X_MAX_NORMAL) return INFINITY;
+    if (x < X_MIN_NORMAL) return 0.0f;
 
     float y = x * LOG2_10_HI + x * LOG2_10_LO;
     float n = round_shifter(y);
@@ -283,7 +273,7 @@ float exp10_v5(float x) {
     poly = poly * r + M5_C1;
     poly = poly * r + M5_C0;
 
-    return pow2i_reconstruct((int32_t)n) * poly;
+    return pow2i_reconstruct_normal((int32_t)n) * poly;
 }
 
 /* ---------- V6 ---------- */
@@ -292,8 +282,8 @@ __attribute__((noinline))
 float exp10_v6(float x) {
     if (isnan(x)) return NAN;
     if (isinf(x)) return x > 0 ? INFINITY : 0.0f;
-    if (x > X_MAX) return INFINITY;
-    if (x < X_MIN) return 0.0f;
+    if (x > X_MAX_NORMAL) return INFINITY;
+    if (x < X_MIN_NORMAL) return 0.0f;
 
     float y = fmaf(x, LOG2_10_HI, x * LOG2_10_LO);
 
@@ -312,7 +302,7 @@ float exp10_v6(float x) {
     float poly = fmaf(S2_C2, r, S2_C1);
     poly = fmaf(poly, r, S2_C0);
 
-    float base = pow2i_reconstruct(n);
+    float base = pow2i_reconstruct_normal(n);
     float table_val = g_exp2_table[i];
 
     return base * table_val * poly;
@@ -397,7 +387,7 @@ static row_result_t measure_scalar_row(scalar_fn_t fn, int accuracy_samples, int
 
         for (int i = 0; i < accuracy_samples; ++i) {
             float t = (float)i / (float)(accuracy_samples - 1);
-            float x = X_MIN + (X_MAX - X_MIN) * t;
+            float x = X_MIN_NORMAL + (X_MAX_NORMAL - X_MIN_NORMAL) * t;
 
             float my = fn(x);
             float ref = ref_exp10f(x);
@@ -453,9 +443,6 @@ static row_result_t measure_scalar_row(scalar_fn_t fn, int accuracy_samples, int
 
         rr.latency_cpe = best;
 
-        if (prev == -999.0f) {
-            printf("ignore: %f\n", prev);
-        }
     }
 
     /* throughput: independent calls, measured but not shown for scalar rows */
@@ -492,10 +479,6 @@ static row_result_t measure_scalar_row(scalar_fn_t fn, int accuracy_samples, int
         }
 
         rr.throughput_cpe = best;
-
-        if ((r0 + r1 + r2 + r3) == -999.0f) {
-            printf("ignore: %f\n", r0);
-        }
     }
 
     return rr;
@@ -650,7 +633,7 @@ int main(void) {
     printf("1) scalar rows report latency only\n");
     printf("2) vector row V7 reports throughput only\n");
     printf("3) accuracy is reported as max/avg ULP on %d grid points in [%.5f, %.5f]\n",
-           ACCURACY_SAMPLES, X_MIN, X_MAX);
+           ACCURACY_SAMPLES, X_MIN_NORMAL, X_MAX_NORMAL);
     printf("\n");
 
     return 0;
